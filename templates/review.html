@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Photo Deduper - Review</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; }
+    .group { border: 1px solid #ccc; padding: 1rem; margin-bottom: 1.5rem; }
+    .photos { display: flex; flex-wrap: wrap; gap: 1rem; }
+    .photo { text-align: center; }
+    .photo img { max-width: 200px; max-height: 200px; display: block; }
+    .photo.suggested { outline: 3px solid #2a7; }
+    .meta { font-size: 0.8rem; color: #555; }
+    .errors { color: #b00; }
+  </style>
+</head>
+<body>
+  <h1>Duplicate groups ({{ groups|length }} remaining)</h1>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul class="errors">
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+  {% if not groups %}
+    <p>No duplicate groups left to review.</p>
+  {% endif %}
+  {% for group in groups %}
+    <form class="group" method="post" action="{{ url_for('resolve') }}">
+      <input type="hidden" name="group_id" value="{{ group.id }}">
+      <div class="photos">
+        {% for photo in group.photos %}
+          <div class="photo{% if loop.first %} suggested{% endif %}">
+            <label>
+              <input type="checkbox" name="keep" value="{{ photo.path }}" {% if loop.first %}checked{% endif %}>
+              <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
+            </label>
+            <div class="meta">
+              {{ photo.width }}x{{ photo.height }}<br>
+              {{ (photo.file_size / 1024)|round(1) }} KB<br>
+              sharpness: {{ photo.sharpness|round(1) }}
+            </div>
+            <input type="hidden" name="all_paths" value="{{ photo.path }}">
+          </div>
+        {% endfor %}
+      </div>
+      <button type="submit">Resolve group (move unchecked to quarantine)</button>
+    </form>
+  {% endfor %}
+</body>
+</html>
