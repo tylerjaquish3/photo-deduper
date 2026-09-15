@@ -1,1 +1,7 @@
-.worktrees/
+venv/
+__pycache__/
+*.pyc
+*.db
+moves.log
+_duplicates_review/
+.pytest_cache/
