@@ -9,6 +9,11 @@ help you pick which copy of each to keep.
     source venv/bin/activate
     pip install -r requirements.txt
 
+If `pip install` fails with an SSL certificate error, you're likely behind
+a corporate TLS-inspecting proxy (e.g. Zscaler). Find your proxy's root
+cert (on this machine: `/etc/ssl/certs/zscaler_root_and_inter.pem`) and
+install with `PIP_CERT=/path/to/cert.pem pip install -r requirements.txt`.
+
 ## Usage
 
 1. Scan the directory you want to clean up (this can take a while the
@@ -29,9 +34,10 @@ help you pick which copy of each to keep.
 
 4. Photos you didn't keep are moved (not deleted) into a
    `_duplicates_review/` folder at the root of the scanned directory.
-   Every move is also recorded in `moves.log` there, so you can
-   manually undo any decision. Once you've spot-checked the
-   `_duplicates_review/` folder, delete it yourself when you're ready.
+   Every move is also recorded in `moves.log`, next to it at the root
+   of the scanned directory, so you can manually undo any decision.
+   Once you've spot-checked the `_duplicates_review/` folder, delete
+   it yourself when you're ready.
 
 ## Tests
 
