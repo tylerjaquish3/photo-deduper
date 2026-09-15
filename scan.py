@@ -20,6 +20,7 @@ def find_image_files(root):
 
 
 def scan_directory(root, conn):
+    root = str(Path(root).resolve())
     scanned = 0
     skipped = 0
     errors = 0
@@ -70,7 +71,7 @@ def main(argv=None):
         print(str(exc), file=sys.stderr)
         return 1
 
-    db_path = Path(args.root) / DB_FILENAME
+    db_path = Path(args.root).resolve() / DB_FILENAME
     conn = db.init_db(db_path)
     summary = scan_directory(args.root, conn)
     print(

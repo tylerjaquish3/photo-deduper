@@ -20,16 +20,24 @@ help you pick which copy of each to keep.
 
        python review.py /Volumes/YourDrive/Photos
 
-3. Open http://127.0.0.1:5000 in your browser. Each duplicate group
-   shows thumbnails with resolution, file size, and a sharpness score;
-   the suggested keeper is highlighted and pre-checked. Adjust the
-   checkboxes if you disagree, then click "Resolve group."
+3. Open http://127.0.0.1:5151 in your browser. Each duplicate group
+   shows thumbnails with resolution, file size, sharpness score, and
+   date taken; the suggested keeper is highlighted and pre-checked.
+   Adjust the checkboxes if you disagree, then click "Resolve group."
+   (The server defaults to port 5151 instead of 5000 since 5000
+   collides with macOS AirPlay Receiver; pass `--port` to change it.)
 
 4. Photos you didn't keep are moved (not deleted) into a
    `_duplicates_review/` folder at the root of the scanned directory.
    Every move is also recorded in `moves.log` there, so you can
    manually undo any decision. Once you've spot-checked the
    `_duplicates_review/` folder, delete it yourself when you're ready.
+
+## Tests
+
+Run the test suite:
+
+    pytest
 
 ## Smoke test
 

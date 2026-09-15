@@ -18,6 +18,8 @@ from pathlib import Path
 
 from PIL import Image
 
+PORT = 5151
+
 
 def main():
     tmp_dir = Path(tempfile.mkdtemp(prefix="photo_deduper_smoke_"))
@@ -40,10 +42,14 @@ def run_smoke_test(tmp_dir):
     print(scan_result.stdout)
     assert "Scanned 2 new files" in scan_result.stdout, scan_result.stdout
 
-    server = subprocess.Popen([sys.executable, "review.py", str(tmp_dir)])
+    server = subprocess.Popen(
+        [sys.executable, "review.py", str(tmp_dir), "--port", str(PORT)]
+    )
     try:
-        _wait_for_server("http://127.0.0.1:5000/", timeout=10)
-        html = urllib.request.urlopen("http://127.0.0.1:5000/").read().decode()
+        index_url = f"http://127.0.0.1:{PORT}/"
+        resolve_url = f"http://127.0.0.1:{PORT}/resolve"
+        _wait_for_server(index_url, timeout=10)
+        html = urllib.request.urlopen(index_url).read().decode()
         assert "Resolve group" in html, "expected a duplicate group on the review page"
 
         group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
@@ -55,7 +61,7 @@ def run_smoke_test(tmp_dir):
             + [("all_paths", p) for p in all_paths]
         ).encode()
         urllib.request.urlopen(
-            urllib.request.Request("http://127.0.0.1:5000/resolve", data=body, method="POST")
+            urllib.request.Request(resolve_url, data=body, method="POST")
         )
 
         quarantine_dir = tmp_dir / "_duplicates_review"

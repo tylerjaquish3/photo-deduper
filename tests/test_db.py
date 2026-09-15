@@ -68,6 +68,17 @@ def test_all_files_returns_every_row(tmp_path):
     assert {f["path"] for f in files} == {"/a.jpg", "/b.jpg"}
 
 
+def test_delete_file_removes_row(tmp_path):
+    conn = db.init_db(tmp_path / "test.db")
+    db.upsert_file(conn, "/a.jpg", 100, 1.0, "hash-a", 800, 600, 100, "2024-01-01", 12.5)
+    db.upsert_file(conn, "/b.jpg", 200, 2.0, "hash-b", 400, 300, 200, "2024-02-01", 5.0)
+
+    db.delete_file(conn, "/a.jpg")
+
+    paths = {f["path"] for f in db.all_files(conn)}
+    assert paths == {"/b.jpg"}
+
+
 def test_resolved_groups_round_trip(tmp_path):
     conn = db.init_db(tmp_path / "test.db")
     assert db.is_group_resolved(conn, "g1") is False

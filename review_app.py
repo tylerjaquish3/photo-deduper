@@ -9,6 +9,7 @@ from PIL import Image
 
 import db
 import grouping
+import hashing  # noqa: F401  (imported for its HEIC-opener registration side effect)
 
 QUARANTINE_DIRNAME = "_duplicates_review"
 DB_FILENAME = "photo_deduper.db"
@@ -44,7 +45,7 @@ def create_app(root):
     def thumbnail():
         requested = Path(request.args.get("path", "")).resolve()
         root_dir = app.config["ROOT"]
-        if requested != root_dir and root_dir not in requested.parents:
+        if not _is_within_root(requested, root_dir):
             abort(403)
         try:
             with Image.open(requested) as img:
@@ -61,30 +62,50 @@ def create_app(root):
         group_id = request.form["group_id"]
         keep_paths = set(request.form.getlist("keep"))
         all_paths = request.form.getlist("all_paths")
+        root_dir = app.config["ROOT"]
+
+        if not keep_paths:
+            flash("Select at least one photo to keep before resolving.")
+            return redirect(url_for("index"))
+
+        for path_str in all_paths:
+            if not _is_within_root(Path(path_str).resolve(), root_dir):
+                flash(f"Rejected: {path_str} is outside the scanned directory.")
+                return redirect(url_for("index"))
 
         app.config["QUARANTINE_DIR"].mkdir(exist_ok=True)
+        conn = db.init_db(app.config["DB_PATH"])
         errors = []
         for path_str in all_paths:
             if path_str in keep_paths:
                 continue
             source = Path(path_str)
+            if not source.exists():
+                # Already moved on a prior (partially failed) attempt — the
+                # cache row is stale, but there's nothing left to move.
+                db.delete_file(conn, path_str)
+                continue
             destination = _unique_destination(app.config["QUARANTINE_DIR"], source)
             try:
                 shutil.move(str(source), str(destination))
                 _log_move(app.config["MOVES_LOG"], source, destination)
-            except OSError as exc:
+                db.delete_file(conn, path_str)
+            except (OSError, shutil.Error) as exc:
                 errors.append(f"{source}: {exc}")
 
         if errors:
             for error in errors:
                 flash(f"Failed to move {error}")
         else:
-            conn = db.init_db(app.config["DB_PATH"])
             db.mark_group_resolved(conn, group_id)
 
         return redirect(url_for("index"))
 
     return app
+
+
+def _is_within_root(path, root_dir):
+    return path == root_dir or root_dir in path.parents
 
 
 def _unique_destination(quarantine_dir, source):

@@ -91,6 +91,11 @@ def all_files(conn):
     ]
 
 
+def delete_file(conn, path):
+    conn.execute("DELETE FROM files WHERE path = ?", (path,))
+    conn.commit()
+
+
 def is_group_resolved(conn, group_id):
     row = conn.execute(
         "SELECT 1 FROM resolved_groups WHERE group_id = ?", (group_id,)

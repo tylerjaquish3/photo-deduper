@@ -76,6 +76,18 @@ def test_rank_group_prefers_resolution_then_sharpness_then_file_size():
     ]
 
 
+def test_rank_group_breaks_ties_deterministically_by_path():
+    group = [
+        _record("/z_photo.jpg", "0", width=100, height=100, sharpness=10, file_size=500),
+        _record("/a_photo.jpg", "0", width=100, height=100, sharpness=10, file_size=500),
+        _record("/m_photo.jpg", "0", width=100, height=100, sharpness=10, file_size=500),
+    ]
+
+    ranked = grouping.rank_group(group)
+
+    assert [r["path"] for r in ranked] == ["/a_photo.jpg", "/m_photo.jpg", "/z_photo.jpg"]
+
+
 def test_group_id_is_stable_regardless_of_order():
     group_a = [_record("/a.jpg", "0"), _record("/b.jpg", "0")]
     group_b = [_record("/b.jpg", "0"), _record("/a.jpg", "0")]

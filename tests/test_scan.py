@@ -1,3 +1,5 @@
+import os
+
 from PIL import Image
 
 import db
@@ -61,6 +63,22 @@ def test_find_image_files_only_matches_supported_extensions(tmp_path):
 
     assert len(found) == 1
     assert found[0].endswith("photo.jpg")
+
+
+def test_scan_directory_stores_absolute_paths_when_given_relative_root(tmp_path, monkeypatch):
+    subdir = tmp_path / "photos"
+    subdir.mkdir()
+    _make_image(subdir / "one.jpg")
+    conn = db.init_db(tmp_path / "photo_deduper.db")
+
+    monkeypatch.chdir(tmp_path)
+    summary = scan.scan_directory("photos", conn)
+
+    assert summary == {"scanned": 1, "skipped": 0, "errors": 0}
+    stored_paths = [f["path"] for f in db.all_files(conn)]
+    assert len(stored_paths) == 1
+    assert os.path.isabs(stored_paths[0])
+    assert stored_paths[0] == str(subdir / "one.jpg")
 
 
 def test_scan_directory_handles_broken_symlink_without_aborting(tmp_path):

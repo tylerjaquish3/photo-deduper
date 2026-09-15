@@ -41,7 +41,8 @@
             <div class="meta">
               {{ photo.width }}x{{ photo.height }}<br>
               {{ (photo.file_size / 1024)|round(1) }} KB<br>
-              sharpness: {{ photo.sharpness|round(1) }}
+              sharpness: {{ photo.sharpness|round(1) }}<br>
+              date taken: {{ photo.date_taken }}
             </div>
             <input type="hidden" name="all_paths" value="{{ photo.path }}">
           </div>

@@ -60,8 +60,7 @@ def group_photos(records, threshold=8, batch_size=500):
 def rank_group(group):
     return sorted(
         group,
-        key=lambda r: (r["width"] * r["height"], r["sharpness"], r["file_size"]),
-        reverse=True,
+        key=lambda r: (-(r["width"] * r["height"]), -r["sharpness"], -r["file_size"], r["path"]),
     )
 
 
