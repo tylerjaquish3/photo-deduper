@@ -25,13 +25,13 @@ def scan_directory(root, conn):
     errors = 0
 
     for path in find_image_files(root):
-        stat = os.stat(path)
-        cached = db.get_cached_entry(conn, path, stat.st_size, stat.st_mtime)
-        if cached is not None:
-            skipped += 1
-            continue
-
         try:
+            stat = os.stat(path)
+            cached = db.get_cached_entry(conn, path, stat.st_size, stat.st_mtime)
+            if cached is not None:
+                skipped += 1
+                continue
+
             phash = str(hashing.compute_phash(path))
             sharpness = hashing.compute_sharpness(path)
             metadata = hashing.get_metadata(path, stat.st_mtime)

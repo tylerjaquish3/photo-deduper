@@ -61,3 +61,16 @@ def test_find_image_files_only_matches_supported_extensions(tmp_path):
 
     assert len(found) == 1
     assert found[0].endswith("photo.jpg")
+
+
+def test_scan_directory_handles_broken_symlink_without_aborting(tmp_path):
+    _make_image(tmp_path / "good.jpg")
+    broken_link = tmp_path / "broken.jpg"
+    broken_link.symlink_to(tmp_path / "does_not_exist.jpg")
+    conn = db.init_db(tmp_path / "photo_deduper.db")
+
+    summary = scan.scan_directory(str(tmp_path), conn)
+
+    assert summary == {"scanned": 1, "skipped": 0, "errors": 1}
+    errors = conn.execute("SELECT path FROM scan_errors").fetchall()
+    assert len(errors) == 1
