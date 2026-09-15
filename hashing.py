@@ -43,10 +43,11 @@ def get_metadata(path, fallback_mtime):
         width, height = img.size
         date_taken = None
         exif = img.getexif()
-        if exif and _DATE_TAG_ID in exif:
+        exif_ifd = exif.get_ifd(0x8769)
+        if _DATE_TAG_ID in exif_ifd:
             try:
                 date_taken = datetime.strptime(
-                    str(exif[_DATE_TAG_ID]), "%Y:%m:%d %H:%M:%S"
+                    str(exif_ifd[_DATE_TAG_ID]), "%Y:%m:%d %H:%M:%S"
                 ).isoformat()
             except ValueError:
                 date_taken = None

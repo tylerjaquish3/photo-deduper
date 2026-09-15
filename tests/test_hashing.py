@@ -1,4 +1,6 @@
 from datetime import datetime
+import io
+import struct
 
 import pytest
 from PIL import Image, ImageDraw
@@ -20,6 +22,28 @@ def _make_test_image(variant="stripes", size=(400, 300)):
                 if (x // 20 + y // 20) % 2 == 0:
                     draw.rectangle([x, y, x + 20, y + 20], fill=(0, 0, 0))
     return img
+
+
+def _make_image_with_exif_date(path, date_str="2020:05:15 10:30:00"):
+    date_bytes = (date_str + "\x00").encode("ascii")
+    tiff = b"II*\x00" + struct.pack("<I", 8)
+    ifd0 = struct.pack("<H", 1)
+    ifd0 += struct.pack("<HHII", 0x8769, 4, 1, 26)
+    ifd0 += struct.pack("<I", 0)
+    sub_ifd = struct.pack("<H", 1)
+    sub_ifd += struct.pack("<HHII", 0x9003, 2, len(date_bytes), 44)
+    sub_ifd += struct.pack("<I", 0)
+    tiff_full = tiff + ifd0 + sub_ifd + date_bytes
+    app1_payload = b"Exif\x00\x00" + tiff_full
+    app1_segment = b"\xff\xe1" + struct.pack(">H", len(app1_payload) + 2) + app1_payload
+
+    base = _make_test_image("stripes")
+    buf_io = io.BytesIO()
+    base.save(buf_io, format="jpeg")
+    raw = buf_io.getvalue()
+    assert raw[0:2] == b"\xff\xd8"
+    with open(path, "wb") as f:
+        f.write(raw[0:2] + app1_segment + raw[2:])
 
 
 @pytest.fixture
@@ -79,3 +103,12 @@ def test_get_metadata_falls_back_to_mtime_when_no_exif_date(sample_images):
 
 def test_check_heic_support_does_not_raise_when_installed():
     hashing.check_heic_support()
+
+
+def test_get_metadata_reads_real_exif_date_taken(tmp_path):
+    path = tmp_path / "with_exif.jpg"
+    _make_image_with_exif_date(path, "2020:05:15 10:30:00")
+
+    metadata = hashing.get_metadata(path, fallback_mtime=1700000000)
+
+    assert metadata["date_taken"] == "2020-05-15T10:30:00"
