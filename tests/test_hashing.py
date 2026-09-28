@@ -139,3 +139,39 @@ def test_png_with_camera_exif_is_not_flagged_as_screenshot(tmp_path):
     img.save(path, format="PNG", exif=exif)
 
     assert hashing.is_screenshot(path) is False
+
+
+def test_compute_phash_is_orientation_invariant(tmp_path):
+    # Same photo, two files: one stored upright, one with raw pixels
+    # physically rotated but tagged with an EXIF orientation that a viewer
+    # would rotate back to look identical to the upright copy. Without
+    # normalizing orientation before hashing, these would hash as unrelated
+    # images and never get grouped as duplicates.
+    canonical = _make_test_image("stripes")
+    upright_path = tmp_path / "upright.jpg"
+    canonical.save(upright_path, quality=95)
+
+    rotated_raw_path = tmp_path / "rotated_raw.jpg"
+    rotated_raw = canonical.transpose(Image.ROTATE_90)
+    exif = rotated_raw.getexif()
+    exif[0x0112] = 6  # "rotate 90 CW to display correctly"
+    rotated_raw.save(rotated_raw_path, exif=exif, quality=95)
+
+    upright_hash = hashing.compute_phash(upright_path)
+    rotated_hash = hashing.compute_phash(rotated_raw_path)
+
+    assert (upright_hash - rotated_hash) <= 8
+
+
+def test_get_metadata_uses_display_orientation_for_dimensions(tmp_path):
+    canonical = _make_test_image("stripes", size=(400, 300))  # landscape
+
+    rotated_raw_path = tmp_path / "rotated.jpg"
+    rotated_raw = canonical.transpose(Image.ROTATE_90)  # raw pixels: portrait
+    exif = rotated_raw.getexif()
+    exif[0x0112] = 6  # displays as landscape again
+    rotated_raw.save(rotated_raw_path, exif=exif, quality=95)
+
+    metadata = hashing.get_metadata(rotated_raw_path, fallback_mtime=1700000000)
+
+    assert (metadata["width"], metadata["height"]) == (400, 300)

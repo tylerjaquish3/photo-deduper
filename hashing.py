@@ -3,7 +3,7 @@ from datetime import datetime
 import cv2
 import imagehash
 import numpy as np
-from PIL import ExifTags, Image
+from PIL import ExifTags, Image, ImageOps
 
 try:
     import pillow_heif
@@ -25,8 +25,12 @@ def check_heic_support():
 
 
 def compute_phash(path):
+    # Two copies of the same photo can carry different EXIF orientation
+    # (e.g. one was re-saved by an app that bakes in rotation, the other
+    # wasn't). Without normalizing, their raw pixel grids differ and the
+    # hash misses the match even though they look identical on screen.
     with Image.open(path) as img:
-        return imagehash.phash(img)
+        return imagehash.phash(ImageOps.exif_transpose(img))
 
 
 def compute_sharpness(path):
@@ -57,10 +61,13 @@ def is_screenshot(path):
 
 def get_metadata(path, fallback_mtime):
     with Image.open(path) as img:
-        width, height = img.size
         img_format = img.format
         date_taken = None
         exif = img.getexif()
+        # Width/height should reflect how the photo actually displays, not
+        # its raw pixel grid, so a portrait shot stored with a rotation
+        # flag doesn't get sized as if it were landscape.
+        width, height = ImageOps.exif_transpose(img).size
         exif_ifd = exif.get_ifd(0x8769)
         if _DATE_TAG_ID in exif_ifd:
             try:

@@ -120,6 +120,46 @@ def test_init_db_backfills_is_screenshot_for_pre_existing_rows(tmp_path):
     assert by_path[str(photo_path)]["is_screenshot"] is False
 
 
+def test_get_cached_entry_misses_when_hash_version_is_stale(tmp_path):
+    conn = db.init_db(tmp_path / "test.db")
+    db.upsert_file(conn, "/a.jpg", 100, 1.0, "abc123", 800, 600, 100, "2024-01-01", 12.5, False)
+    assert db.get_cached_entry(conn, "/a.jpg", 100, 1.0) is not None
+
+    # Simulate a row written before a hashing algorithm change bumped
+    # CURRENT_HASH_VERSION; it must be treated as a cache miss so scan.py
+    # recomputes it, rather than trusting a phash from the old algorithm.
+    conn.execute("UPDATE files SET hash_version = 0 WHERE path = '/a.jpg'")
+
+    assert db.get_cached_entry(conn, "/a.jpg", 100, 1.0) is None
+
+
+def test_init_db_forces_recompute_for_rows_predating_hash_version_column(tmp_path):
+    db_path = tmp_path / "test.db"
+
+    # Simulate a database created before the hash_version column existed.
+    old_schema_conn = sqlite3.connect(db_path)
+    old_schema_conn.execute(
+        "CREATE TABLE files (path TEXT PRIMARY KEY, size INTEGER NOT NULL, "
+        "mtime REAL NOT NULL, phash TEXT NOT NULL, width INTEGER NOT NULL, "
+        "height INTEGER NOT NULL, file_size INTEGER NOT NULL, "
+        "date_taken TEXT NOT NULL, sharpness REAL NOT NULL, "
+        "is_screenshot INTEGER NOT NULL DEFAULT 0)"
+    )
+    old_schema_conn.execute(
+        "INSERT INTO files (path, size, mtime, phash, width, height, "
+        "file_size, date_taken, sharpness, is_screenshot) VALUES "
+        "('/old.jpg', 100, 1.0, 'stale-hash', 800, 600, 100, '2024-01-01', 0.0, 0)"
+    )
+    old_schema_conn.commit()
+    old_schema_conn.close()
+
+    conn = db.init_db(db_path)
+
+    # The pre-existing row must miss the cache so its phash gets recomputed
+    # under the current (fixed) hashing logic.
+    assert db.get_cached_entry(conn, "/old.jpg", 100, 1.0) is None
+
+
 def test_resolved_groups_round_trip(tmp_path):
     conn = db.init_db(tmp_path / "test.db")
     assert db.is_group_resolved(conn, "g1") is False

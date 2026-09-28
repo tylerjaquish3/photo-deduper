@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS files (
     file_size INTEGER NOT NULL,
     date_taken TEXT NOT NULL,
     sharpness REAL NOT NULL,
-    is_screenshot INTEGER NOT NULL DEFAULT 0
+    is_screenshot INTEGER NOT NULL DEFAULT 0,
+    hash_version INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS scan_errors (
@@ -25,6 +26,12 @@ CREATE TABLE IF NOT EXISTS resolved_groups (
 );
 """
 
+# Bump this whenever hashing.compute_phash (or anything else cached per-file)
+# changes in a way that makes previously-stored values wrong. A row whose
+# hash_version doesn't match becomes a cache miss, so scan.py naturally
+# recomputes it — a one-time full rescan instead of a manual cache wipe.
+CURRENT_HASH_VERSION = 1
+
 
 def init_db(db_path):
     conn = sqlite3.connect(db_path)
@@ -33,6 +40,8 @@ def init_db(db_path):
     if "is_screenshot" not in columns:
         conn.execute("ALTER TABLE files ADD COLUMN is_screenshot INTEGER NOT NULL DEFAULT 0")
         _backfill_is_screenshot(conn)
+    if "hash_version" not in columns:
+        conn.execute("ALTER TABLE files ADD COLUMN hash_version INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     return conn
 
@@ -57,8 +66,8 @@ def _backfill_is_screenshot(conn):
 def get_cached_entry(conn, path, size, mtime):
     row = conn.execute(
         "SELECT phash, width, height, file_size, date_taken, sharpness, is_screenshot "
-        "FROM files WHERE path = ? AND size = ? AND mtime = ?",
-        (path, size, mtime),
+        "FROM files WHERE path = ? AND size = ? AND mtime = ? AND hash_version = ?",
+        (path, size, mtime, CURRENT_HASH_VERSION),
     ).fetchone()
     if row is None:
         return None
@@ -78,14 +87,18 @@ def upsert_file(
 ):
     conn.execute(
         "INSERT INTO files "
-        "(path, size, mtime, phash, width, height, file_size, date_taken, sharpness, is_screenshot) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "(path, size, mtime, phash, width, height, file_size, date_taken, sharpness, "
+        "is_screenshot, hash_version) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(path) DO UPDATE SET "
         "size=excluded.size, mtime=excluded.mtime, phash=excluded.phash, "
         "width=excluded.width, height=excluded.height, file_size=excluded.file_size, "
         "date_taken=excluded.date_taken, sharpness=excluded.sharpness, "
-        "is_screenshot=excluded.is_screenshot",
-        (path, size, mtime, phash, width, height, file_size, date_taken, sharpness, int(is_screenshot)),
+        "is_screenshot=excluded.is_screenshot, hash_version=excluded.hash_version",
+        (
+            path, size, mtime, phash, width, height, file_size, date_taken, sharpness,
+            int(is_screenshot), CURRENT_HASH_VERSION,
+        ),
     )
     conn.commit()
 

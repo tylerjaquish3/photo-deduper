@@ -76,7 +76,7 @@ def create_app(root):
         try:
             with Image.open(requested) as img:
                 img = ImageOps.exif_transpose(img)
-                img.thumbnail((300, 300))
+                img.thumbnail((500, 500))
                 buffer = BytesIO()
                 img.convert("RGB").save(buffer, format="JPEG")
                 buffer.seek(0)
