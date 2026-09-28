@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from PIL import Image
 
@@ -92,3 +93,30 @@ def test_scan_directory_handles_broken_symlink_without_aborting(tmp_path):
     assert summary == {"scanned": 1, "skipped": 0, "errors": 1}
     errors = conn.execute("SELECT path FROM scan_errors").fetchall()
     assert len(errors) == 1
+
+
+def test_scan_directory_reports_progress_for_every_file_including_errors(tmp_path):
+    _make_image(tmp_path / "one.jpg")
+    _make_image(tmp_path / "two.jpg", color=(0, 255, 0))
+    (tmp_path / "corrupt.jpg").write_bytes(b"not a real image")
+    conn = db.init_db(tmp_path / "photo_deduper.db")
+
+    calls = []
+    scan.scan_directory(str(tmp_path), conn, on_progress=lambda i, total, path: calls.append((i, total, path)))
+
+    assert len(calls) == 3
+    # every call reports the same total, and indexes count up from 1 in order
+    assert [c[1] for c in calls] == [3, 3, 3]
+    assert [c[0] for c in calls] == [1, 2, 3]
+    assert {Path(c[2]).name for c in calls} == {"one.jpg", "two.jpg", "corrupt.jpg"}
+
+
+def test_scan_directory_calls_on_progress_even_for_cached_and_skipped_files(tmp_path):
+    _make_image(tmp_path / "one.jpg")
+    conn = db.init_db(tmp_path / "photo_deduper.db")
+    scan.scan_directory(str(tmp_path), conn)
+
+    calls = []
+    scan.scan_directory(str(tmp_path), conn, on_progress=lambda i, total, path: calls.append((i, total, path)))
+
+    assert calls == [(1, 1, str(tmp_path / "one.jpg"))]
