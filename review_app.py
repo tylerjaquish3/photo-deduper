@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import Path
 
 from flask import Flask, abort, flash, redirect, render_template, request, send_file, url_for
-from PIL import Image
+from PIL import Image, ImageOps
 
 import db
 import grouping
@@ -49,6 +49,7 @@ def create_app(root):
             abort(403)
         try:
             with Image.open(requested) as img:
+                img = ImageOps.exif_transpose(img)
                 img.thumbnail((300, 300))
                 buffer = BytesIO()
                 img.convert("RGB").save(buffer, format="JPEG")
@@ -60,11 +61,12 @@ def create_app(root):
     @app.route("/resolve", methods=["POST"])
     def resolve():
         group_id = request.form["group_id"]
-        keep_paths = set(request.form.getlist("keep"))
+        action = request.form.get("action", "resolve")
         all_paths = request.form.getlist("all_paths")
+        keep_paths = set() if action == "remove_all" else set(request.form.getlist("keep"))
         root_dir = app.config["ROOT"]
 
-        if not keep_paths:
+        if action != "remove_all" and not keep_paths:
             flash("Select at least one photo to keep before resolving.")
             return redirect(url_for("index"))
 

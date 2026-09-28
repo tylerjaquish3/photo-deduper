@@ -1,6 +1,7 @@
 import json
 import re
 import shutil
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
@@ -75,6 +76,22 @@ def test_index_shows_no_groups_message_when_empty(tmp_path):
     assert b"No duplicate groups left to review" in response.data
 
 
+def test_thumbnail_applies_exif_orientation(tmp_path):
+    path = tmp_path / "sideways.jpg"
+    img = Image.new("RGB", (40, 20), color=(255, 0, 0))
+    exif = img.getexif()
+    exif[0x0112] = 6  # rotated 90 degrees; correct display is portrait
+    img.save(path, exif=exif)
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    response = client.get("/thumbnail", query_string={"path": str(path)})
+
+    assert response.status_code == 200
+    with Image.open(BytesIO(response.data)) as thumb:
+        width, height = thumb.size
+    assert height > width
+
+
 def test_thumbnail_rejects_path_outside_root(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
@@ -122,6 +139,28 @@ def test_resolve_moves_unkept_files_and_hides_group(tmp_path):
     for line in lines:
         entry = json.loads(line)
         assert set(entry.keys()) == {"original_path", "new_path", "timestamp"}
+
+
+def test_resolve_remove_all_moves_every_photo_without_a_keeper(tmp_path):
+    conn = _seed_duplicate_group(tmp_path)
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    html = client.get("/").data.decode()
+    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
+    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+
+    response = client.post(
+        "/resolve",
+        data={"group_id": group_id, "action": "remove_all", "all_paths": all_paths},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    quarantine_dir = tmp_path / "_duplicates_review"
+    moved_files = list(quarantine_dir.iterdir())
+    assert len(moved_files) == len(all_paths)
+    assert b"No duplicate groups left to review" in response.data
+    assert db.all_files(conn) == []
 
 
 def test_resolve_reports_move_failure_and_keeps_group_unresolved(tmp_path, monkeypatch):
