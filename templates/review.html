@@ -9,7 +9,17 @@
     nav { margin-bottom: 1rem; border-bottom: 1px solid #ccc; }
     nav a { display: inline-block; padding: 0.25rem 0.6rem; font-size: 0.8rem; text-decoration: none; color: #555; }
     nav a.active { color: #000; border-bottom: 2px solid #2a7; font-weight: 600; }
-    .group { border: 1px solid #ccc; padding: 1rem; margin-bottom: 1.5rem; }
+    .action-bar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; gap: 0.75rem;
+      background: #fff; padding: 0.6rem 0; margin-bottom: 1rem; border-bottom: 1px solid #ddd;
+    }
+    .action-bar button { font-size: 0.85rem; padding: 0.4rem 1rem; }
+    .action-bar .hint { font-size: 0.75rem; color: #777; }
+    .group { border: 1px solid #ccc; padding: 1rem; margin-bottom: 1.5rem; transition: opacity 0.15s; }
+    .group.queued { opacity: 0.45; }
+    .group-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+    .queue-badge { font-size: 0.75rem; font-weight: 600; color: #2a7; }
     .photos { display: flex; flex-wrap: wrap; gap: 1rem; }
     .photo { text-align: center; }
     .photo img { max-width: 200px; max-height: 200px; display: block; }
@@ -19,7 +29,6 @@
     .shots { display: flex; flex-wrap: wrap; gap: 1rem; }
     .shot { text-align: center; }
     .shot img { max-width: 200px; max-height: 200px; display: block; }
-    .shot button { margin-top: 0.4rem; }
   </style>
 </head>
 <body>
@@ -42,48 +51,101 @@
     <h1>Duplicate groups ({{ groups|length }} remaining)</h1>
     {% if not groups %}
       <p>No duplicate groups left to review.</p>
-    {% endif %}
-    {% for group in groups %}
-      <form class="group" method="post" action="{{ url_for('resolve') }}">
-        <input type="hidden" name="group_id" value="{{ group.id }}">
-        <div class="photos">
-          {% for photo in group.photos %}
-            <div class="photo{% if loop.first %} suggested{% endif %}">
-              <label>
-                <input type="checkbox" name="keep" value="{{ photo.path }}" {% if loop.first %}checked{% endif %}>
-                <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
-              </label>
-              <div class="meta">
-                {{ photo.width }}x{{ photo.height }}<br>
-                {{ (photo.file_size / 1024)|round(1) }} KB<br>
-                sharpness: {{ photo.sharpness|round(1) }}
-              </div>
-              <input type="hidden" name="all_paths" value="{{ photo.path }}">
-            </div>
-          {% endfor %}
+    {% else %}
+      <form id="review-form" method="post" action="{{ url_for('resolve_batch') }}">
+        <div class="action-bar">
+          <button type="submit">Save<span id="save-count"></span></button>
+          <span class="hint">Mark groups below, then Save to apply everything at once.</span>
         </div>
-        <button type="submit" name="action" value="resolve">Resolve</button>
-        <button type="submit" name="action" value="keep_all">Keep all</button>
-        <button type="submit" name="action" value="remove_all">Delete all</button>
+        {% for group in groups %}
+          <div class="group" id="group-{{ group.id }}">
+            <input type="hidden" name="group_ids" value="{{ group.id }}">
+            <input type="hidden" name="action_{{ group.id }}" id="action-{{ group.id }}" value="">
+            <div class="photos">
+              {% for photo in group.photos %}
+                <div class="photo{% if loop.first %} suggested{% endif %}">
+                  <label>
+                    <input type="checkbox" name="keep_{{ group.id }}" value="{{ photo.path }}" {% if loop.first %}checked{% endif %}>
+                    <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
+                  </label>
+                  <div class="meta">
+                    {{ photo.width }}x{{ photo.height }}<br>
+                    {{ (photo.file_size / 1024)|round(1) }} KB<br>
+                    sharpness: {{ photo.sharpness|round(1) }}
+                  </div>
+                  <input type="hidden" name="all_paths_{{ group.id }}" value="{{ photo.path }}">
+                </div>
+              {% endfor %}
+            </div>
+            <div class="group-actions">
+              <button type="button" onclick="queueGroupAction('{{ group.id }}', 'resolve')">Resolve</button>
+              <button type="button" onclick="queueGroupAction('{{ group.id }}', 'keep_all')">Keep all</button>
+              <button type="button" onclick="queueGroupAction('{{ group.id }}', 'remove_all')">Delete all</button>
+              <span class="queue-badge" id="badge-{{ group.id }}"></span>
+            </div>
+          </div>
+        {% endfor %}
       </form>
-    {% endfor %}
+    {% endif %}
   {% else %}
     <h1>Screenshots ({{ screenshots|length }})</h1>
     {% if not screenshots %}
       <p>No screenshots found.</p>
-    {% endif %}
-    <div class="shots">
-      {% for photo in screenshots %}
-        <div class="shot">
-          <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
-          <div class="meta">{{ photo.width }}x{{ photo.height }}</div>
-          <form method="post" action="{{ url_for('delete_screenshot') }}">
-            <input type="hidden" name="path" value="{{ photo.path }}">
-            <button type="submit">Delete</button>
-          </form>
+    {% else %}
+      <form id="screenshots-form" method="post" action="{{ url_for('delete_screenshots_batch') }}">
+        <div class="action-bar">
+          <button type="submit" id="delete-btn" disabled>Delete<span id="delete-count"></span></button>
+          <span class="hint">Check the screenshots to remove, then Delete.</span>
         </div>
-      {% endfor %}
-    </div>
+        <div class="shots">
+          {% for photo in screenshots %}
+            <div class="shot">
+              <label>
+                <input type="checkbox" name="path" value="{{ photo.path }}" class="shot-check">
+                <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
+              </label>
+              <div class="meta">{{ photo.width }}x{{ photo.height }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </form>
+    {% endif %}
   {% endif %}
+
+  <script>
+    var pendingGroupActions = {};
+    var GROUP_ACTION_LABELS = { resolve: "Resolve", keep_all: "Keep all", remove_all: "Delete all" };
+
+    function queueGroupAction(groupId, action) {
+      pendingGroupActions[groupId] = action;
+      document.getElementById("action-" + groupId).value = action;
+      document.getElementById("group-" + groupId).classList.add("queued");
+      document.getElementById("badge-" + groupId).textContent = "Queued: " + GROUP_ACTION_LABELS[action];
+
+      var count = Object.keys(pendingGroupActions).length;
+      var saveCount = document.getElementById("save-count");
+      if (saveCount) {
+        saveCount.textContent = count > 0 ? " (" + count + " queued)" : "";
+      }
+    }
+
+    (function setUpScreenshotSelection() {
+      var checkboxes = document.querySelectorAll(".shot-check");
+      var deleteBtn = document.getElementById("delete-btn");
+      var deleteCount = document.getElementById("delete-count");
+      if (!checkboxes.length || !deleteBtn) {
+        return;
+      }
+      function refresh() {
+        var checked = document.querySelectorAll(".shot-check:checked").length;
+        deleteBtn.disabled = checked === 0;
+        deleteCount.textContent = checked > 0 ? " (" + checked + ")" : "";
+      }
+      checkboxes.forEach(function (checkbox) {
+        checkbox.addEventListener("change", refresh);
+      });
+      refresh();
+    })();
+  </script>
 </body>
 </html>

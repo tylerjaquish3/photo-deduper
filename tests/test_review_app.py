@@ -60,6 +60,41 @@ def _seed_duplicate_group_of_three(tmp_path):
     return conn, paths
 
 
+def _seed_two_duplicate_groups(tmp_path):
+    """Two independent duplicate groups with hand-picked phashes so they
+    cluster separately regardless of actual pixel content."""
+    conn = db.init_db(tmp_path / "photo_deduper.db")
+    specs = [
+        ("group1_a.jpg", "0000000000000000"),
+        ("group1_b.jpg", "0000000000000001"),
+        ("group2_a.jpg", "ffffffffffffffff"),
+        ("group2_b.jpg", "fffffffffffffffe"),
+    ]
+    paths = []
+    for filename, phash in specs:
+        path = tmp_path / filename
+        _make_image(path, (120, 120, 120), (200, 150))
+        stat = path.stat()
+        with Image.open(path) as img:
+            width, height = img.size
+        db.upsert_file(
+            conn, str(path), stat.st_size, stat.st_mtime, phash,
+            width, height, stat.st_size, "2024-01-01", 10.0, False,
+        )
+        paths.append(path)
+    return conn, paths
+
+
+def _extract_groups(html):
+    """Returns [(group_id, [all_paths...]), ...] in page order."""
+    group_ids = re.findall(r'name="group_ids" value="([^"]+)"', html)
+    groups = []
+    for gid in group_ids:
+        all_paths = re.findall(rf'name="all_paths_{gid}" value="([^"]+)"', html)
+        groups.append((gid, all_paths))
+    return groups
+
+
 def test_index_lists_unresolved_groups(tmp_path):
     _seed_duplicate_group(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
@@ -106,18 +141,22 @@ def test_thumbnail_rejects_path_outside_root(tmp_path):
     assert response.status_code == 403
 
 
-def test_resolve_moves_unkept_files_and_hides_group(tmp_path):
+def test_resolve_batch_moves_unkept_files_and_hides_group(tmp_path):
     conn = _seed_duplicate_group(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
 
     html = client.get("/").data.decode()
-    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+    (gid, all_paths), = _extract_groups(html)
     keep_path = all_paths[0]
 
     response = client.post(
-        "/resolve",
-        data={"group_id": group_id, "keep": keep_path, "all_paths": all_paths},
+        "/resolve_batch",
+        data={
+            "group_ids": gid,
+            f"action_{gid}": "resolve",
+            f"keep_{gid}": keep_path,
+            f"all_paths_{gid}": all_paths,
+        },
         follow_redirects=True,
     )
 
@@ -143,17 +182,20 @@ def test_resolve_moves_unkept_files_and_hides_group(tmp_path):
         assert set(entry.keys()) == {"original_path", "new_path", "timestamp"}
 
 
-def test_resolve_remove_all_moves_every_photo_without_a_keeper(tmp_path):
+def test_resolve_batch_remove_all_moves_every_photo_without_a_keeper(tmp_path):
     conn = _seed_duplicate_group(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
 
     html = client.get("/").data.decode()
-    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+    (gid, all_paths), = _extract_groups(html)
 
     response = client.post(
-        "/resolve",
-        data={"group_id": group_id, "action": "remove_all", "all_paths": all_paths},
+        "/resolve_batch",
+        data={
+            "group_ids": gid,
+            f"action_{gid}": "remove_all",
+            f"all_paths_{gid}": all_paths,
+        },
         follow_redirects=True,
     )
 
@@ -165,17 +207,20 @@ def test_resolve_remove_all_moves_every_photo_without_a_keeper(tmp_path):
     assert db.all_files(conn) == []
 
 
-def test_resolve_keep_all_moves_nothing_and_resolves_group(tmp_path):
+def test_resolve_batch_keep_all_moves_nothing_and_resolves_group(tmp_path):
     conn = _seed_duplicate_group(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
 
     html = client.get("/").data.decode()
-    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+    (gid, all_paths), = _extract_groups(html)
 
     response = client.post(
-        "/resolve",
-        data={"group_id": group_id, "action": "keep_all", "all_paths": all_paths},
+        "/resolve_batch",
+        data={
+            "group_ids": gid,
+            f"action_{gid}": "keep_all",
+            f"all_paths_{gid}": all_paths,
+        },
         follow_redirects=True,
     )
 
@@ -187,13 +232,69 @@ def test_resolve_keep_all_moves_nothing_and_resolves_group(tmp_path):
     assert remaining_paths == set(all_paths)
 
 
-def test_resolve_reports_move_failure_and_keeps_group_unresolved(tmp_path, monkeypatch):
+def test_resolve_batch_handles_multiple_groups_in_one_save(tmp_path):
+    conn, _ = _seed_two_duplicate_groups(tmp_path)
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    html = client.get("/").data.decode()
+    groups = _extract_groups(html)
+    assert len(groups) == 2
+
+    (gid_a, paths_a), (gid_b, paths_b) = groups
+    keep_a = paths_a[0]
+
+    response = client.post(
+        "/resolve_batch",
+        data={
+            "group_ids": [gid_a, gid_b],
+            f"action_{gid_a}": "resolve",
+            f"keep_{gid_a}": keep_a,
+            f"all_paths_{gid_a}": paths_a,
+            f"action_{gid_b}": "remove_all",
+            f"all_paths_{gid_b}": paths_b,
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"No duplicate groups left to review" in response.data
+
+    remaining_paths = {f["path"] for f in db.all_files(conn)}
+    assert remaining_paths == {keep_a}
+
+    quarantine_dir = tmp_path / "_duplicates_review"
+    # the non-kept file from group A, plus both files from group B
+    assert len(list(quarantine_dir.iterdir())) == 3
+
+
+def test_resolve_batch_skips_groups_without_a_queued_action(tmp_path):
     _seed_duplicate_group(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
 
     html = client.get("/").data.decode()
-    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+    (gid, all_paths), = _extract_groups(html)
+
+    # Simulate a Save with this group never marked (no action_<gid> field at
+    # all) — it must be left untouched for next time, not treated as an error.
+    response = client.post(
+        "/resolve_batch", data={"group_ids": gid}, follow_redirects=True
+    )
+
+    assert response.status_code == 200
+    for path_str in all_paths:
+        assert Path(path_str).exists()
+    assert not (tmp_path / "_duplicates_review").exists()
+
+    html_after = client.get("/").data.decode()
+    assert "Resolve" in html_after  # still listed, untouched
+
+
+def test_resolve_batch_reports_move_failure_and_keeps_group_unresolved(tmp_path, monkeypatch):
+    _seed_duplicate_group(tmp_path)
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    html = client.get("/").data.decode()
+    (gid, all_paths), = _extract_groups(html)
     keep_path = all_paths[0]
     blocked_path = all_paths[1]
 
@@ -209,8 +310,13 @@ def test_resolve_reports_move_failure_and_keeps_group_unresolved(tmp_path, monke
     monkeypatch.setattr(review_app.shutil, "move", flaky_move)
 
     response = client.post(
-        "/resolve",
-        data={"group_id": group_id, "keep": keep_path, "all_paths": all_paths},
+        "/resolve_batch",
+        data={
+            "group_ids": gid,
+            f"action_{gid}": "resolve",
+            f"keep_{gid}": keep_path,
+            f"all_paths_{gid}": all_paths,
+        },
         follow_redirects=True,
     )
 
@@ -222,13 +328,12 @@ def test_resolve_reports_move_failure_and_keeps_group_unresolved(tmp_path, monke
     assert "Resolve" in html_after  # group still unresolved
 
 
-def test_resolve_partial_failure_recovers_on_retry(tmp_path, monkeypatch):
+def test_resolve_batch_partial_failure_recovers_on_retry(tmp_path, monkeypatch):
     conn, paths = _seed_duplicate_group_of_three(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
 
     html = client.get("/").data.decode()
-    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+    (gid, all_paths), = _extract_groups(html)
     keep_path = all_paths[0]
     blocked_path = all_paths[2]
 
@@ -245,9 +350,14 @@ def test_resolve_partial_failure_recovers_on_retry(tmp_path, monkeypatch):
 
     monkeypatch.setattr(review_app.shutil, "move", flaky_move)
 
-    form = {"group_id": group_id, "keep": keep_path, "all_paths": all_paths}
+    form = {
+        "group_ids": gid,
+        f"action_{gid}": "resolve",
+        f"keep_{gid}": keep_path,
+        f"all_paths_{gid}": all_paths,
+    }
 
-    first = client.post("/resolve", data=form, follow_redirects=True)
+    first = client.post("/resolve_batch", data=form, follow_redirects=True)
     assert b"Failed to move" in first.data
     assert "Resolve" in first.data.decode()  # still unresolved
 
@@ -272,7 +382,7 @@ def test_resolve_partial_failure_recovers_on_retry(tmp_path, monkeypatch):
 
     monkeypatch.setattr(review_app.shutil, "move", watch_move)
 
-    second = client.post("/resolve", data=form, follow_redirects=True)
+    second = client.post("/resolve_batch", data=form, follow_redirects=True)
 
     assert second.status_code == 200
     assert b"Failed to move" not in second.data
@@ -288,17 +398,20 @@ def test_resolve_partial_failure_recovers_on_retry(tmp_path, monkeypatch):
     assert len(quarantine_contents) == 2  # the two non-kept files
 
 
-def test_resolve_with_no_keepers_touches_nothing(tmp_path):
+def test_resolve_batch_with_no_keepers_touches_nothing(tmp_path):
     _seed_duplicate_group(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
 
     html = client.get("/").data.decode()
-    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+    (gid, all_paths), = _extract_groups(html)
 
     response = client.post(
-        "/resolve",
-        data={"group_id": group_id, "all_paths": all_paths},
+        "/resolve_batch",
+        data={
+            "group_ids": gid,
+            f"action_{gid}": "resolve",
+            f"all_paths_{gid}": all_paths,
+        },
         follow_redirects=True,
     )
 
@@ -312,7 +425,7 @@ def test_resolve_with_no_keepers_touches_nothing(tmp_path):
     assert "Resolve" in html_after  # group still listed
 
 
-def test_resolve_rejects_path_outside_root(tmp_path):
+def test_resolve_batch_rejects_path_outside_root(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     conn, paths = _seed_photos(
@@ -327,16 +440,16 @@ def test_resolve_rejects_path_outside_root(tmp_path):
 
     client = review_app.create_app(str(root)).test_client()
     html = client.get("/").data.decode()
-    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+    (gid, all_paths), = _extract_groups(html)
     keep_path = all_paths[0]
 
     response = client.post(
-        "/resolve",
+        "/resolve_batch",
         data={
-            "group_id": group_id,
-            "keep": keep_path,
-            "all_paths": all_paths + [str(outside)],
+            "group_ids": gid,
+            f"action_{gid}": "resolve",
+            f"keep_{gid}": keep_path,
+            f"all_paths_{gid}": all_paths + [str(outside)],
         },
         follow_redirects=True,
     )
@@ -379,35 +492,55 @@ def test_screenshots_shows_empty_message_when_none_found(tmp_path):
     assert b"No screenshots found" in response.data
 
 
-def test_delete_screenshot_moves_file_and_removes_from_cache(tmp_path):
+def test_delete_screenshots_batch_removes_only_checked_ones(tmp_path):
     conn, paths = _seed_photos(
-        tmp_path, [("shot.png", (10, 20, 30), (100, 200), True)]
+        tmp_path,
+        [
+            ("shot_a.png", (10, 20, 30), (100, 200), True),
+            ("shot_b.png", (10, 20, 30), (100, 200), True),
+            ("shot_c.png", (10, 20, 30), (100, 200), True),
+        ],
     )
-    shot_path = paths[0]
+    to_delete = [paths[0], paths[2]]
+    kept = paths[1]
     client = review_app.create_app(str(tmp_path)).test_client()
 
     response = client.post(
-        "/screenshots/delete", data={"path": str(shot_path)}, follow_redirects=True
+        "/screenshots/delete_batch",
+        data={"path": [str(p) for p in to_delete]},
+        follow_redirects=True,
     )
 
     assert response.status_code == 200
-    assert not shot_path.exists()
+    for path in to_delete:
+        assert not path.exists()
+    assert kept.exists()
+
     quarantine_dir = tmp_path / "_duplicates_review"
-    assert len(list(quarantine_dir.iterdir())) == 1
-    assert db.all_files(conn) == []
-    assert b"No screenshots found" in response.data
+    assert len(list(quarantine_dir.iterdir())) == 2
+
+    remaining_paths = {f["path"] for f in db.all_files(conn)}
+    assert remaining_paths == {str(kept)}
+
+    html_after = response.data.decode()
+    assert "Screenshots (1)" in html_after
 
 
-def test_delete_screenshot_rejects_path_outside_root(tmp_path):
+def test_delete_screenshots_batch_rejects_path_outside_root(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     outside = tmp_path / "outside.png"
     _make_image(outside, (0, 0, 255), size=(50, 50))
     client = review_app.create_app(str(root)).test_client()
 
-    response = client.post("/screenshots/delete", data={"path": str(outside)})
+    response = client.post(
+        "/screenshots/delete_batch",
+        data={"path": str(outside)},
+        follow_redirects=True,
+    )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert b"outside the scanned directory" in response.data
     assert outside.exists()
 
 

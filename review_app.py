@@ -48,16 +48,23 @@ def create_app(root):
         shots = sorted((r for r in records if r["is_screenshot"]), key=lambda r: r["path"])
         return render_template("review.html", active_tab="screenshots", screenshots=shots)
 
-    @app.route("/screenshots/delete", methods=["POST"])
-    def delete_screenshot():
-        path_str = request.form["path"]
+    @app.route("/screenshots/delete_batch", methods=["POST"])
+    def delete_screenshots_batch():
         root_dir = app.config["ROOT"]
-        if not _is_within_root(Path(path_str).resolve(), root_dir):
-            abort(403)
+        paths = request.form.getlist("path")
         conn = db.init_db(app.config["DB_PATH"])
-        error = _move_to_quarantine(app, conn, path_str)
-        if error:
-            flash(f"Failed to delete {error}")
+        errors = []
+        for path_str in paths:
+            if not _is_within_root(Path(path_str).resolve(), root_dir):
+                errors.append(f"Rejected: {path_str} is outside the scanned directory.")
+                continue
+            error = _move_to_quarantine(app, conn, path_str)
+            if error:
+                errors.append(f"Failed to delete {error}")
+
+        for error in errors:
+            flash(error)
+
         return redirect(url_for("screenshots"))
 
     @app.route("/thumbnail")
@@ -77,42 +84,54 @@ def create_app(root):
             abort(404)
         return send_file(buffer, mimetype="image/jpeg")
 
-    @app.route("/resolve", methods=["POST"])
-    def resolve():
-        group_id = request.form["group_id"]
-        action = request.form.get("action", "resolve")
-        all_paths = request.form.getlist("all_paths")
-        if action == "remove_all":
-            keep_paths = set()
-        elif action == "keep_all":
-            keep_paths = set(all_paths)
-        else:
-            keep_paths = set(request.form.getlist("keep"))
+    @app.route("/resolve_batch", methods=["POST"])
+    def resolve_batch():
         root_dir = app.config["ROOT"]
-
-        if action == "resolve" and not keep_paths:
-            flash("Select at least one photo to keep before resolving.")
-            return redirect(url_for("index"))
-
-        for path_str in all_paths:
-            if not _is_within_root(Path(path_str).resolve(), root_dir):
-                flash(f"Rejected: {path_str} is outside the scanned directory.")
-                return redirect(url_for("index"))
-
+        group_ids = request.form.getlist("group_ids")
         conn = db.init_db(app.config["DB_PATH"])
         errors = []
-        for path_str in all_paths:
-            if path_str in keep_paths:
-                continue
-            error = _move_to_quarantine(app, conn, path_str)
-            if error:
-                errors.append(error)
 
-        if errors:
-            for error in errors:
-                flash(f"Failed to move {error}")
-        else:
-            db.mark_group_resolved(conn, group_id)
+        for gid in group_ids:
+            action = request.form.get(f"action_{gid}", "")
+            if not action:
+                continue  # user hasn't marked this group yet; leave it for next time
+
+            all_paths = request.form.getlist(f"all_paths_{gid}")
+            bad_path = next(
+                (p for p in all_paths if not _is_within_root(Path(p).resolve(), root_dir)),
+                None,
+            )
+            if bad_path:
+                errors.append(f"Rejected: {bad_path} is outside the scanned directory.")
+                continue
+
+            if action == "remove_all":
+                keep_paths = set()
+            elif action == "keep_all":
+                keep_paths = set(all_paths)
+            else:
+                keep_paths = set(request.form.getlist(f"keep_{gid}"))
+                if not keep_paths:
+                    errors.append(
+                        "Select at least one photo to keep, or use Keep all/Delete all."
+                    )
+                    continue
+
+            group_errors = []
+            for path_str in all_paths:
+                if path_str in keep_paths:
+                    continue
+                error = _move_to_quarantine(app, conn, path_str)
+                if error:
+                    group_errors.append(error)
+
+            if group_errors:
+                errors.extend(f"Failed to move {error}" for error in group_errors)
+            else:
+                db.mark_group_resolved(conn, gid)
+
+        for error in errors:
+            flash(error)
 
         return redirect(url_for("index"))
 

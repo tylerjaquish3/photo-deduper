@@ -47,18 +47,22 @@ def run_smoke_test(tmp_dir):
     )
     try:
         index_url = f"http://127.0.0.1:{PORT}/"
-        resolve_url = f"http://127.0.0.1:{PORT}/resolve"
+        resolve_url = f"http://127.0.0.1:{PORT}/resolve_batch"
         _wait_for_server(index_url, timeout=10)
         html = urllib.request.urlopen(index_url).read().decode()
         assert "Resolve" in html, "expected a duplicate group on the review page"
 
-        group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
-        all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+        group_id = re.search(r'name="group_ids" value="([^"]+)"', html).group(1)
+        all_paths = re.findall(rf'name="all_paths_{group_id}" value="([^"]+)"', html)
         keep_path = all_paths[0]
 
         body = urllib.parse.urlencode(
-            [("group_id", group_id), ("keep", keep_path)]
-            + [("all_paths", p) for p in all_paths]
+            [
+                ("group_ids", group_id),
+                (f"action_{group_id}", "resolve"),
+                (f"keep_{group_id}", keep_path),
+            ]
+            + [(f"all_paths_{group_id}", p) for p in all_paths]
         ).encode()
         urllib.request.urlopen(
             urllib.request.Request(resolve_url, data=body, method="POST")
