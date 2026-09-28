@@ -6,13 +6,14 @@ help you pick which copy of each to keep.
 ## Installing Python
 
 Skip this if `python3 --version` (macOS/Linux) or `python --version`
-(Windows) already prints a version number.
+(Windows) already prints a version number — any Python 3.10+ works,
+Python 3.14 included.
 
 ### Windows
 
 Easiest: open Git Bash or PowerShell and run:
 
-    winget install Python.Python.3.12
+    winget install Python.Python.3.14
 
 Restart your terminal afterward so it picks up the new PATH, then check
 with `python --version`.
@@ -70,13 +71,13 @@ command. Close and reopen Git Bash afterward so it picks up the new PATH.
 1. Scan the directory you want to clean up (this can take a while the
    first time; re-running it later only processes new/changed files):
 
-       python scan.py /Volumes/YourDrive/Photos    # macOS
-       python scan.py "D:/Photos"                  # Windows
+       python scan.py /Volumes/YourDrive/Photos          # macOS
+       python scan.py "F:/My Files/Photos/Kimberly"       # Windows
 
 2. Start the review server, pointed at the same directory:
 
-       python review.py /Volumes/YourDrive/Photos    # macOS
-       python review.py "D:/Photos"                  # Windows
+       python review.py /Volumes/YourDrive/Photos         # macOS
+       python review.py "F:/My Files/Photos/Kimberly"      # Windows
 
 3. Open http://127.0.0.1:5151 in your browser. Each duplicate group
    shows thumbnails with resolution, file size, sharpness score, and
