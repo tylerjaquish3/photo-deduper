@@ -16,10 +16,12 @@ def _make_image(path, color, size):
 
 
 def _seed_photos(tmp_path, specs):
-    """specs: list of (filename, color, size). Returns (conn, [Path, ...])."""
+    """specs: list of (filename, color, size[, is_screenshot]). Returns (conn, [Path, ...])."""
     conn = db.init_db(tmp_path / "photo_deduper.db")
     paths = []
-    for filename, color, size in specs:
+    for spec in specs:
+        filename, color, size = spec[:3]
+        is_screenshot = spec[3] if len(spec) > 3 else False
         path = tmp_path / filename
         _make_image(path, color, size)
         stat = path.stat()
@@ -29,7 +31,7 @@ def _seed_photos(tmp_path, specs):
             width, height = img.size
         db.upsert_file(
             conn, str(path), stat.st_size, stat.st_mtime, phash,
-            width, height, stat.st_size, "2024-01-01", sharpness,
+            width, height, stat.st_size, "2024-01-01", sharpness, is_screenshot,
         )
         paths.append(path)
     return conn, paths
@@ -347,13 +349,13 @@ def test_resolve_rejects_path_outside_root(tmp_path):
     assert not (root / "_duplicates_review").exists()
 
 
-def test_screenshots_lists_only_screenshot_filenames(tmp_path):
+def test_screenshots_lists_only_files_flagged_as_screenshots(tmp_path):
     conn, paths = _seed_photos(
         tmp_path,
         [
-            ("Screenshot 2024-01-01 at 12.34.56.png", (10, 20, 30), (100, 200)),
-            ("Screen Shot 2024-02-02 at 1.00.00.png", (10, 20, 30), (100, 200)),
-            ("vacation.jpg", (200, 50, 50), (400, 300)),
+            ("shot_a.png", (10, 20, 30), (100, 200), True),
+            ("shot_b.png", (10, 20, 30), (100, 200), True),
+            ("vacation.jpg", (200, 50, 50), (400, 300), False),
         ],
     )
     client = review_app.create_app(str(tmp_path)).test_client()
@@ -379,7 +381,7 @@ def test_screenshots_shows_empty_message_when_none_found(tmp_path):
 
 def test_delete_screenshot_moves_file_and_removes_from_cache(tmp_path):
     conn, paths = _seed_photos(
-        tmp_path, [("Screenshot 2024-01-01.png", (10, 20, 30), (100, 200))]
+        tmp_path, [("shot.png", (10, 20, 30), (100, 200), True)]
     )
     shot_path = paths[0]
     client = review_app.create_app(str(tmp_path)).test_client()

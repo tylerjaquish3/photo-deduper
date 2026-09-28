@@ -1,5 +1,4 @@
 import json
-import re
 import shutil
 from datetime import datetime, timezone
 from io import BytesIO
@@ -15,12 +14,6 @@ import hashing  # noqa: F401  (imported for its HEIC-opener registration side ef
 QUARANTINE_DIRNAME = "_duplicates_review"
 DB_FILENAME = "photo_deduper.db"
 MOVES_LOG_FILENAME = "moves.log"
-
-_SCREENSHOT_NAME_RE = re.compile(r"screen\s*shot", re.IGNORECASE)
-
-
-def _is_screenshot(path_str):
-    return bool(_SCREENSHOT_NAME_RE.search(Path(path_str).name))
 
 
 def create_app(root):
@@ -52,7 +45,7 @@ def create_app(root):
     def screenshots():
         conn = db.init_db(app.config["DB_PATH"])
         records = db.all_files(conn)
-        shots = sorted((r for r in records if _is_screenshot(r["path"])), key=lambda r: r["path"])
+        shots = sorted((r for r in records if r["is_screenshot"]), key=lambda r: r["path"])
         return render_template("review.html", active_tab="screenshots", screenshots=shots)
 
     @app.route("/screenshots/delete", methods=["POST"])

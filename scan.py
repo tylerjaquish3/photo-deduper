@@ -52,6 +52,7 @@ def scan_directory(root, conn):
             stat.st_size,
             metadata["date_taken"],
             sharpness,
+            metadata["is_screenshot"],
         )
         scanned += 1
 

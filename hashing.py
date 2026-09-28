@@ -36,11 +36,29 @@ def compute_sharpness(path):
 
 
 _DATE_TAG_ID = next(k for k, v in ExifTags.TAGS.items() if v == "DateTimeOriginal")
+_MAKE_TAG_ID = next(k for k, v in ExifTags.TAGS.items() if v == "Make")
+_MODEL_TAG_ID = next(k for k, v in ExifTags.TAGS.items() if v == "Model")
+
+# Camera photos carry a Make/Model EXIF tag; OS screenshot tools never write
+# one and almost always save as PNG, so that combination is a reliable
+# content-based signal without needing image classification.
+_SCREENSHOT_FORMATS = {"PNG", "BMP"}
+
+
+def _detect_screenshot(img_format, exif):
+    has_camera_exif = _MAKE_TAG_ID in exif or _MODEL_TAG_ID in exif
+    return img_format in _SCREENSHOT_FORMATS and not has_camera_exif
+
+
+def is_screenshot(path):
+    with Image.open(path) as img:
+        return _detect_screenshot(img.format, img.getexif())
 
 
 def get_metadata(path, fallback_mtime):
     with Image.open(path) as img:
         width, height = img.size
+        img_format = img.format
         date_taken = None
         exif = img.getexif()
         exif_ifd = exif.get_ifd(0x8769)
@@ -55,4 +73,9 @@ def get_metadata(path, fallback_mtime):
     if date_taken is None:
         date_taken = datetime.fromtimestamp(fallback_mtime).isoformat()
 
-    return {"width": width, "height": height, "date_taken": date_taken}
+    return {
+        "width": width,
+        "height": height,
+        "date_taken": date_taken,
+        "is_screenshot": _detect_screenshot(img_format, exif),
+    }

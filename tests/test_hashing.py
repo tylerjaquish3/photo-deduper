@@ -112,3 +112,30 @@ def test_get_metadata_reads_real_exif_date_taken(tmp_path):
     metadata = hashing.get_metadata(path, fallback_mtime=1700000000)
 
     assert metadata["date_taken"] == "2020-05-15T10:30:00"
+
+
+def test_jpeg_without_camera_exif_is_not_flagged_as_screenshot(sample_images):
+    metadata = hashing.get_metadata(sample_images["original"], fallback_mtime=1700000000)
+
+    assert metadata["is_screenshot"] is False
+    assert hashing.is_screenshot(sample_images["original"]) is False
+
+
+def test_png_without_camera_exif_is_flagged_as_screenshot(tmp_path):
+    path = tmp_path / "shot.png"
+    _make_test_image("stripes").save(path, format="PNG")
+
+    metadata = hashing.get_metadata(path, fallback_mtime=1700000000)
+
+    assert metadata["is_screenshot"] is True
+    assert hashing.is_screenshot(path) is True
+
+
+def test_png_with_camera_exif_is_not_flagged_as_screenshot(tmp_path):
+    path = tmp_path / "camera.png"
+    img = _make_test_image("stripes")
+    exif = img.getexif()
+    exif[0x010F] = "TestCameraCo"  # Make
+    img.save(path, format="PNG", exif=exif)
+
+    assert hashing.is_screenshot(path) is False
