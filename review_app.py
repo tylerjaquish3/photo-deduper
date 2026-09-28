@@ -63,10 +63,15 @@ def create_app(root):
         group_id = request.form["group_id"]
         action = request.form.get("action", "resolve")
         all_paths = request.form.getlist("all_paths")
-        keep_paths = set() if action == "remove_all" else set(request.form.getlist("keep"))
+        if action == "remove_all":
+            keep_paths = set()
+        elif action == "keep_all":
+            keep_paths = set(all_paths)
+        else:
+            keep_paths = set(request.form.getlist("keep"))
         root_dir = app.config["ROOT"]
 
-        if action != "remove_all" and not keep_paths:
+        if action == "resolve" and not keep_paths:
             flash("Select at least one photo to keep before resolving.")
             return redirect(url_for("index"))
 

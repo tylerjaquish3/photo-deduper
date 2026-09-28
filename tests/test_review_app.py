@@ -65,7 +65,7 @@ def test_index_lists_unresolved_groups(tmp_path):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert b"Resolve group" in response.data
+    assert b"Resolve" in response.data
 
 
 def test_index_shows_no_groups_message_when_empty(tmp_path):
@@ -163,6 +163,28 @@ def test_resolve_remove_all_moves_every_photo_without_a_keeper(tmp_path):
     assert db.all_files(conn) == []
 
 
+def test_resolve_keep_all_moves_nothing_and_resolves_group(tmp_path):
+    conn = _seed_duplicate_group(tmp_path)
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    html = client.get("/").data.decode()
+    group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
+    all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)
+
+    response = client.post(
+        "/resolve",
+        data={"group_id": group_id, "action": "keep_all", "all_paths": all_paths},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    quarantine_dir = tmp_path / "_duplicates_review"
+    assert list(quarantine_dir.glob("*")) == []
+    assert b"No duplicate groups left to review" in response.data
+    remaining_paths = {f["path"] for f in db.all_files(conn)}
+    assert remaining_paths == set(all_paths)
+
+
 def test_resolve_reports_move_failure_and_keeps_group_unresolved(tmp_path, monkeypatch):
     _seed_duplicate_group(tmp_path)
     client = review_app.create_app(str(tmp_path)).test_client()
@@ -195,7 +217,7 @@ def test_resolve_reports_move_failure_and_keeps_group_unresolved(tmp_path, monke
     assert Path(blocked_path).exists()  # move failed, source untouched
 
     html_after = client.get("/").data.decode()
-    assert "Resolve group" in html_after  # group still unresolved
+    assert "Resolve" in html_after  # group still unresolved
 
 
 def test_resolve_partial_failure_recovers_on_retry(tmp_path, monkeypatch):
@@ -225,7 +247,7 @@ def test_resolve_partial_failure_recovers_on_retry(tmp_path, monkeypatch):
 
     first = client.post("/resolve", data=form, follow_redirects=True)
     assert b"Failed to move" in first.data
-    assert "Resolve group" in first.data.decode()  # still unresolved
+    assert "Resolve" in first.data.decode()  # still unresolved
 
     # The unblocked file was moved and its stale row pruned; the blocked
     # file's source is still on disk and its row still present.
@@ -285,7 +307,7 @@ def test_resolve_with_no_keepers_touches_nothing(tmp_path):
     assert not (tmp_path / "_duplicates_review").exists()
 
     html_after = client.get("/").data.decode()
-    assert "Resolve group" in html_after  # group still listed
+    assert "Resolve" in html_after  # group still listed
 
 
 def test_resolve_rejects_path_outside_root(tmp_path):

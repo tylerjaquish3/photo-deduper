@@ -50,7 +50,7 @@ def run_smoke_test(tmp_dir):
         resolve_url = f"http://127.0.0.1:{PORT}/resolve"
         _wait_for_server(index_url, timeout=10)
         html = urllib.request.urlopen(index_url).read().decode()
-        assert "Resolve group" in html, "expected a duplicate group on the review page"
+        assert "Resolve" in html, "expected a duplicate group on the review page"
 
         group_id = re.search(r'name="group_id" value="([^"]+)"', html).group(1)
         all_paths = re.findall(r'name="all_paths" value="([^"]+)"', html)

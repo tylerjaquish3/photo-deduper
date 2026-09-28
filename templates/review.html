@@ -48,11 +48,9 @@
           </div>
         {% endfor %}
       </div>
-      <button type="submit" name="action" value="resolve">Resolve group (move unchecked to quarantine)</button>
-      <button type="submit" name="action" value="remove_all"
-              onclick="return confirm('Move all {{ group.photos|length }} photos in this group to quarantine? None will be kept.');">
-        Remove entire group (delete all copies)
-      </button>
+      <button type="submit" name="action" value="resolve">Resolve</button>
+      <button type="submit" name="action" value="keep_all">Keep all</button>
+      <button type="submit" name="action" value="remove_all">Delete all</button>
     </form>
   {% endfor %}
 </body>
