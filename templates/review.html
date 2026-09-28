@@ -5,6 +5,10 @@
   <title>Photo Deduper - Review</title>
   <style>
     body { font-family: sans-serif; margin: 2rem; }
+    h1 { font-size: 0.85rem; font-weight: 600; color: #555; margin: 0 0 1rem; }
+    nav { margin-bottom: 1.5rem; border-bottom: 1px solid #ccc; }
+    nav a { display: inline-block; padding: 0.5rem 1rem; text-decoration: none; color: #555; }
+    nav a.active { color: #000; border-bottom: 2px solid #2a7; font-weight: 600; }
     .group { border: 1px solid #ccc; padding: 1rem; margin-bottom: 1.5rem; }
     .photos { display: flex; flex-wrap: wrap; gap: 1rem; }
     .photo { text-align: center; }
@@ -12,10 +16,18 @@
     .photo.suggested { outline: 3px solid #2a7; }
     .meta { font-size: 0.8rem; color: #555; }
     .errors { color: #b00; }
+    .shots { display: flex; flex-wrap: wrap; gap: 1rem; }
+    .shot { text-align: center; }
+    .shot img { max-width: 200px; max-height: 200px; display: block; }
+    .shot button { margin-top: 0.4rem; }
   </style>
 </head>
 <body>
-  <h1>Duplicate groups ({{ groups|length }} remaining)</h1>
+  <nav>
+    <a href="{{ url_for('index') }}" class="{{ 'active' if active_tab == 'duplicates' }}">Duplicates</a>
+    <a href="{{ url_for('screenshots') }}" class="{{ 'active' if active_tab == 'screenshots' }}">Screenshots</a>
+  </nav>
+
   {% with messages = get_flashed_messages() %}
     {% if messages %}
       <ul class="errors">
@@ -25,33 +37,53 @@
       </ul>
     {% endif %}
   {% endwith %}
-  {% if not groups %}
-    <p>No duplicate groups left to review.</p>
-  {% endif %}
-  {% for group in groups %}
-    <form class="group" method="post" action="{{ url_for('resolve') }}">
-      <input type="hidden" name="group_id" value="{{ group.id }}">
-      <div class="photos">
-        {% for photo in group.photos %}
-          <div class="photo{% if loop.first %} suggested{% endif %}">
-            <label>
-              <input type="checkbox" name="keep" value="{{ photo.path }}" {% if loop.first %}checked{% endif %}>
-              <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
-            </label>
-            <div class="meta">
-              {{ photo.width }}x{{ photo.height }}<br>
-              {{ (photo.file_size / 1024)|round(1) }} KB<br>
-              sharpness: {{ photo.sharpness|round(1) }}<br>
-              date taken: {{ photo.date_taken }}
+
+  {% if active_tab == 'duplicates' %}
+    <h1>Duplicate groups ({{ groups|length }} remaining)</h1>
+    {% if not groups %}
+      <p>No duplicate groups left to review.</p>
+    {% endif %}
+    {% for group in groups %}
+      <form class="group" method="post" action="{{ url_for('resolve') }}">
+        <input type="hidden" name="group_id" value="{{ group.id }}">
+        <div class="photos">
+          {% for photo in group.photos %}
+            <div class="photo{% if loop.first %} suggested{% endif %}">
+              <label>
+                <input type="checkbox" name="keep" value="{{ photo.path }}" {% if loop.first %}checked{% endif %}>
+                <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
+              </label>
+              <div class="meta">
+                {{ photo.width }}x{{ photo.height }}<br>
+                {{ (photo.file_size / 1024)|round(1) }} KB<br>
+                sharpness: {{ photo.sharpness|round(1) }}
+              </div>
+              <input type="hidden" name="all_paths" value="{{ photo.path }}">
             </div>
-            <input type="hidden" name="all_paths" value="{{ photo.path }}">
-          </div>
-        {% endfor %}
-      </div>
-      <button type="submit" name="action" value="resolve">Resolve</button>
-      <button type="submit" name="action" value="keep_all">Keep all</button>
-      <button type="submit" name="action" value="remove_all">Delete all</button>
-    </form>
-  {% endfor %}
+          {% endfor %}
+        </div>
+        <button type="submit" name="action" value="resolve">Resolve</button>
+        <button type="submit" name="action" value="keep_all">Keep all</button>
+        <button type="submit" name="action" value="remove_all">Delete all</button>
+      </form>
+    {% endfor %}
+  {% else %}
+    <h1>Screenshots ({{ screenshots|length }})</h1>
+    {% if not screenshots %}
+      <p>No screenshots found.</p>
+    {% endif %}
+    <div class="shots">
+      {% for photo in screenshots %}
+        <div class="shot">
+          <img src="{{ url_for('thumbnail', path=photo.path) }}" alt="">
+          <div class="meta">{{ photo.width }}x{{ photo.height }}</div>
+          <form method="post" action="{{ url_for('delete_screenshot') }}">
+            <input type="hidden" name="path" value="{{ photo.path }}">
+            <button type="submit">Delete</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
 </body>
 </html>

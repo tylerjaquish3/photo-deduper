@@ -347,6 +347,68 @@ def test_resolve_rejects_path_outside_root(tmp_path):
     assert not (root / "_duplicates_review").exists()
 
 
+def test_screenshots_lists_only_screenshot_filenames(tmp_path):
+    conn, paths = _seed_photos(
+        tmp_path,
+        [
+            ("Screenshot 2024-01-01 at 12.34.56.png", (10, 20, 30), (100, 200)),
+            ("Screen Shot 2024-02-02 at 1.00.00.png", (10, 20, 30), (100, 200)),
+            ("vacation.jpg", (200, 50, 50), (400, 300)),
+        ],
+    )
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    response = client.get("/screenshots")
+
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "Screenshots (2)" in html
+    assert str(paths[0]) in html
+    assert str(paths[1]) in html
+    assert str(paths[2]) not in html
+
+
+def test_screenshots_shows_empty_message_when_none_found(tmp_path):
+    _seed_photos(tmp_path, [("vacation.jpg", (200, 50, 50), (400, 300))])
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    response = client.get("/screenshots")
+
+    assert b"No screenshots found" in response.data
+
+
+def test_delete_screenshot_moves_file_and_removes_from_cache(tmp_path):
+    conn, paths = _seed_photos(
+        tmp_path, [("Screenshot 2024-01-01.png", (10, 20, 30), (100, 200))]
+    )
+    shot_path = paths[0]
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    response = client.post(
+        "/screenshots/delete", data={"path": str(shot_path)}, follow_redirects=True
+    )
+
+    assert response.status_code == 200
+    assert not shot_path.exists()
+    quarantine_dir = tmp_path / "_duplicates_review"
+    assert len(list(quarantine_dir.iterdir())) == 1
+    assert db.all_files(conn) == []
+    assert b"No screenshots found" in response.data
+
+
+def test_delete_screenshot_rejects_path_outside_root(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.png"
+    _make_image(outside, (0, 0, 255), size=(50, 50))
+    client = review_app.create_app(str(root)).test_client()
+
+    response = client.post("/screenshots/delete", data={"path": str(outside)})
+
+    assert response.status_code == 403
+    assert outside.exists()
+
+
 def test_importing_review_app_registers_heic_support():
     from PIL import Image
 

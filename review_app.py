@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from io import BytesIO
@@ -14,6 +15,12 @@ import hashing  # noqa: F401  (imported for its HEIC-opener registration side ef
 QUARANTINE_DIRNAME = "_duplicates_review"
 DB_FILENAME = "photo_deduper.db"
 MOVES_LOG_FILENAME = "moves.log"
+
+_SCREENSHOT_NAME_RE = re.compile(r"screen\s*shot", re.IGNORECASE)
+
+
+def _is_screenshot(path_str):
+    return bool(_SCREENSHOT_NAME_RE.search(Path(path_str).name))
 
 
 def create_app(root):
@@ -39,7 +46,26 @@ def create_app(root):
             unresolved.append({"id": gid, "photos": grouping.rank_group(group)})
         unresolved.sort(key=lambda g: len(g["photos"]), reverse=True)
 
-        return render_template("review.html", groups=unresolved)
+        return render_template("review.html", active_tab="duplicates", groups=unresolved)
+
+    @app.route("/screenshots")
+    def screenshots():
+        conn = db.init_db(app.config["DB_PATH"])
+        records = db.all_files(conn)
+        shots = sorted((r for r in records if _is_screenshot(r["path"])), key=lambda r: r["path"])
+        return render_template("review.html", active_tab="screenshots", screenshots=shots)
+
+    @app.route("/screenshots/delete", methods=["POST"])
+    def delete_screenshot():
+        path_str = request.form["path"]
+        root_dir = app.config["ROOT"]
+        if not _is_within_root(Path(path_str).resolve(), root_dir):
+            abort(403)
+        conn = db.init_db(app.config["DB_PATH"])
+        error = _move_to_quarantine(app, conn, path_str)
+        if error:
+            flash(f"Failed to delete {error}")
+        return redirect(url_for("screenshots"))
 
     @app.route("/thumbnail")
     def thumbnail():
@@ -80,25 +106,14 @@ def create_app(root):
                 flash(f"Rejected: {path_str} is outside the scanned directory.")
                 return redirect(url_for("index"))
 
-        app.config["QUARANTINE_DIR"].mkdir(exist_ok=True)
         conn = db.init_db(app.config["DB_PATH"])
         errors = []
         for path_str in all_paths:
             if path_str in keep_paths:
                 continue
-            source = Path(path_str)
-            if not source.exists():
-                # Already moved on a prior (partially failed) attempt — the
-                # cache row is stale, but there's nothing left to move.
-                db.delete_file(conn, path_str)
-                continue
-            destination = _unique_destination(app.config["QUARANTINE_DIR"], source)
-            try:
-                shutil.move(str(source), str(destination))
-                _log_move(app.config["MOVES_LOG"], source, destination)
-                db.delete_file(conn, path_str)
-            except (OSError, shutil.Error) as exc:
-                errors.append(f"{source}: {exc}")
+            error = _move_to_quarantine(app, conn, path_str)
+            if error:
+                errors.append(error)
 
         if errors:
             for error in errors:
@@ -113,6 +128,24 @@ def create_app(root):
 
 def _is_within_root(path, root_dir):
     return path == root_dir or root_dir in path.parents
+
+
+def _move_to_quarantine(app, conn, path_str):
+    source = Path(path_str)
+    if not source.exists():
+        # Already moved on a prior (partially failed) attempt — the
+        # cache row is stale, but there's nothing left to move.
+        db.delete_file(conn, path_str)
+        return None
+    app.config["QUARANTINE_DIR"].mkdir(exist_ok=True)
+    destination = _unique_destination(app.config["QUARANTINE_DIR"], source)
+    try:
+        shutil.move(str(source), str(destination))
+        _log_move(app.config["MOVES_LOG"], source, destination)
+        db.delete_file(conn, path_str)
+        return None
+    except (OSError, shutil.Error) as exc:
+        return f"{source}: {exc}"
 
 
 def _unique_destination(quarantine_dir, source):
