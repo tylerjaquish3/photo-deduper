@@ -14,6 +14,22 @@ import hashing  # noqa: F401  (imported for its HEIC-opener registration side ef
 QUARANTINE_DIRNAME = "_duplicates_review"
 DB_FILENAME = "photo_deduper.db"
 MOVES_LOG_FILENAME = "moves.log"
+MAX_PHOTOS_PER_PAGE = 300
+
+
+def _limit_groups(groups, max_photos):
+    """Take groups (largest first) until the running photo count would
+    exceed max_photos. Always includes at least the first group, even if
+    it alone is bigger than max_photos, so a huge group can't hide the
+    whole page. Returns (visible_groups, hidden_group_count)."""
+    visible = []
+    photo_count = 0
+    for group in groups:
+        if visible and photo_count + len(group["photos"]) > max_photos:
+            break
+        visible.append(group)
+        photo_count += len(group["photos"])
+    return visible, len(groups) - len(visible)
 
 
 def create_app(root):
@@ -38,8 +54,15 @@ def create_app(root):
                 continue
             unresolved.append({"id": gid, "photos": grouping.rank_group(group)})
         unresolved.sort(key=lambda g: len(g["photos"]), reverse=True)
+        visible, hidden_group_count = _limit_groups(unresolved, MAX_PHOTOS_PER_PAGE)
 
-        return render_template("review.html", active_tab="duplicates", groups=unresolved)
+        return render_template(
+            "review.html",
+            active_tab="duplicates",
+            groups=visible,
+            total_unresolved_groups=len(unresolved),
+            hidden_group_count=hidden_group_count,
+        )
 
     @app.route("/screenshots")
     def screenshots():

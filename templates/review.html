@@ -33,6 +33,7 @@
     .photo.suggested { outline: 3px solid #2a7; }
     .meta { font-size: 0.8rem; color: #555; }
     .errors { color: #b00; }
+    .more-groups { padding: 1.5rem 0; text-align: center; color: #777; font-size: 0.85rem; }
     .shots { display: flex; flex-wrap: wrap; gap: 1rem; }
     .shot { text-align: center; }
     .shot img { max-width: 360px; max-height: 360px; display: block; }
@@ -55,14 +56,20 @@
   {% endwith %}
 
   {% if active_tab == 'duplicates' %}
-    <h1>Duplicate groups ({{ groups|length }} remaining)</h1>
+    <h1>Duplicate groups ({{ total_unresolved_groups }} remaining)</h1>
     {% if not groups %}
       <p>No duplicate groups left to review.</p>
     {% else %}
       <form id="review-form" method="post" action="{{ url_for('resolve_batch') }}">
         <div class="action-bar">
           <button type="submit">Save<span id="save-count"></span></button>
-          <span class="hint">Mark groups below, then Save to apply everything at once.</span>
+          <span class="hint">
+            {% if hidden_group_count > 0 %}
+              Showing {{ groups|length }} of {{ total_unresolved_groups }} groups — save your progress to load more photos.
+            {% else %}
+              Mark groups below, then Save to apply everything at once.
+            {% endif %}
+          </span>
         </div>
         {% for group in groups %}
           <div class="group" id="group-{{ group.id }}">
@@ -93,6 +100,12 @@
           </div>
         {% endfor %}
       </form>
+      {% if hidden_group_count > 0 %}
+        <div class="more-groups">
+          {{ hidden_group_count }} more group{{ 's' if hidden_group_count != 1 else '' }} not shown yet —
+          save your progress above to load more photos.
+        </div>
+      {% endif %}
     {% endif %}
   {% else %}
     <h1>Screenshots ({{ screenshots|length }})</h1>

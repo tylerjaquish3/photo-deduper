@@ -85,6 +85,33 @@ def _seed_two_duplicate_groups(tmp_path):
     return conn, paths
 
 
+def _seed_three_duplicate_groups(tmp_path):
+    """Three independent duplicate groups (2 photos each), each pair close
+    together but far from every other group's pair."""
+    conn = db.init_db(tmp_path / "photo_deduper.db")
+    specs = [
+        ("group1_a.jpg", "0000000000000000"),
+        ("group1_b.jpg", "0000000000000001"),
+        ("group2_a.jpg", "ffffffffffffffff"),
+        ("group2_b.jpg", "fffffffffffffffe"),
+        ("group3_a.jpg", "0f0f0f0f0f0f0f0f"),
+        ("group3_b.jpg", "0f0f0f0f0f0f0f0e"),
+    ]
+    paths = []
+    for filename, phash in specs:
+        path = tmp_path / filename
+        _make_image(path, (120, 120, 120), (200, 150))
+        stat = path.stat()
+        with Image.open(path) as img:
+            width, height = img.size
+        db.upsert_file(
+            conn, str(path), stat.st_size, stat.st_mtime, phash,
+            width, height, stat.st_size, "2024-01-01", 10.0, False,
+        )
+        paths.append(path)
+    return conn, paths
+
+
 def _extract_groups(html):
     """Returns [(group_id, [all_paths...]), ...] in page order."""
     group_ids = re.findall(r'name="group_ids" value="([^"]+)"', html)
@@ -111,6 +138,58 @@ def test_index_shows_no_groups_message_when_empty(tmp_path):
     response = client.get("/")
 
     assert b"No duplicate groups left to review" in response.data
+
+
+def test_limit_groups_stops_before_exceeding_max():
+    groups = [{"photos": [1, 2]}, {"photos": [3, 4]}, {"photos": [5, 6]}]
+
+    visible, hidden = review_app._limit_groups(groups, max_photos=4)
+
+    assert visible == groups[:2]
+    assert hidden == 1
+
+
+def test_limit_groups_always_includes_first_group_even_if_over_limit():
+    groups = [{"photos": [1, 2, 3, 4, 5]}, {"photos": [6, 7]}]
+
+    visible, hidden = review_app._limit_groups(groups, max_photos=2)
+
+    assert visible == groups[:1]
+    assert hidden == 1
+
+
+def test_limit_groups_returns_all_when_under_limit():
+    groups = [{"photos": [1, 2]}, {"photos": [3, 4]}]
+
+    visible, hidden = review_app._limit_groups(groups, max_photos=100)
+
+    assert visible == groups
+    assert hidden == 0
+
+
+def test_index_limits_groups_and_shows_load_more_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(review_app, "MAX_PHOTOS_PER_PAGE", 4)
+    _seed_three_duplicate_groups(tmp_path)
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    response = client.get("/")
+    html = response.data.decode()
+
+    assert response.status_code == 200
+    assert "Duplicate groups (3 remaining)" in html
+    assert "Showing 2 of 3 groups" in html
+    assert "1 more group not shown yet" in html
+    assert len(_extract_groups(html)) == 2
+
+
+def test_index_shows_no_load_more_message_when_everything_fits(tmp_path):
+    _seed_three_duplicate_groups(tmp_path)
+    client = review_app.create_app(str(tmp_path)).test_client()
+
+    html = client.get("/").data.decode()
+
+    assert "not shown yet" not in html
+    assert len(_extract_groups(html)) == 3
 
 
 def test_thumbnail_applies_exif_orientation(tmp_path):
